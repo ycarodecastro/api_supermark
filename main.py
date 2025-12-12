@@ -59,6 +59,11 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+
+@app.get("/")
+def root():
+    return {"status": "API funcionando!", "message": "Bem-vindo à API!"}
+
 # ----------------------- CLIENTE -----------------------
 @app.post("/clientes/", response_model=ClientResponse)
 def criar_cliente(cliente: ClientCreate, db: Session = Depends(get_db)):
