@@ -1,16 +1,20 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 class StoreBase(BaseModel):
     nome: str
-    email: EmailStr
-    endereco: str
+    email: str
     cnpj: str
-
-class StoreCreate(StoreBase):
-    password: str  # senha ao criar a loja
 
 class StoreResponse(StoreBase):
     id: int
 
     class Config:
         orm_mode = True
+
+
+class StoreCreate(BaseModel):
+    nome: str
+    email: str
+    endereco: str
+    cnpj: str
+    password: str

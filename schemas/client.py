@@ -1,15 +1,18 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 class ClientBase(BaseModel):
     nome: str
-    email: EmailStr
-    number: str | None = None  # telefone opcional
-
-class ClientCreate(ClientBase):
-    password: str  # senha ao criar o cliente
+    email: str
 
 class ClientResponse(ClientBase):
     id: int
 
     class Config:
         orm_mode = True
+
+
+class ClientCreate(BaseModel):
+    nome: str
+    email: str
+    number: str
+    password: str

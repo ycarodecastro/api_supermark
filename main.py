@@ -4,9 +4,8 @@ from database import Base, engine, SessionLocal
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
+from fastapi.middleware.cors import CORSMiddleware
 
-# Hash de senha
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Configurações JWT
 SECRET_KEY = "sua_chave_super_secreta"
@@ -25,15 +24,24 @@ from schemas.store import StoreCreate, StoreResponse
 from schemas.product import ProductCreate, ProductResponse
 from schemas.order import OrderCreate, OrderResponse
 
+# Criar tabelas no banco
 try:
     Base.metadata.create_all(bind=engine)
     print("Tabelas criadas com sucesso!")
 except Exception as e:
     print(f"Erro ao criar tabelas: {str(e)}")
 
-
 # Inicializando FastAPI
 app = FastAPI(title="API Supermark")
+
+# Adicionando CORS middleware para permitir acessos externos
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permite todos os origens. Substitua por uma lista de URLs de clientes permitidos.
+    allow_credentials=True,
+    allow_methods=["*"],  # Permite todos os métodos (GET, POST, etc.)
+    allow_headers=["*"],  # Permite todos os headers
+)
 
 # Dependência para usar sessão do banco
 def get_db():
@@ -43,12 +51,6 @@ def get_db():
     finally:
         db.close()
 
-# Funções para login e hash
-def hash_password(password: str):
-    return pwd_context.hash(password)
-
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
@@ -57,30 +59,25 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-# -----------------------
-# ROTAS CLIENTE
-# -----------------------
+# ----------------------- CLIENTE -----------------------
 @app.post("/clientes/", response_model=ClientResponse)
 def criar_cliente(cliente: ClientCreate, db: Session = Depends(get_db)):
     existing = db.query(Client).filter(Client.email == cliente.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email já cadastrado")
     
-    hashed_password = hash_password(cliente.password)
     novo_cliente = Client(
         nome=cliente.nome,
         email=cliente.email,
         number=cliente.number,
-        password=hashed_password
+        password=cliente.password
     )
     db.add(novo_cliente)
     db.commit()
     db.refresh(novo_cliente)
     return novo_cliente
 
-# -----------------------
-# ROTAS LOJA
-# -----------------------
+# ----------------------- LOJA -----------------------
 @app.post("/lojas/", response_model=StoreResponse)
 def criar_loja(loja: StoreCreate, db: Session = Depends(get_db)):
     existing_email = db.query(Store).filter(Store.email == loja.email).first()
@@ -90,43 +87,48 @@ def criar_loja(loja: StoreCreate, db: Session = Depends(get_db)):
     if existing_cnpj:
         raise HTTPException(status_code=400, detail="CNPJ já cadastrado")
 
-    hashed_password = hash_password(loja.password)
     nova_loja = Store(
         nome=loja.nome,
         email=loja.email,
         endereco=loja.endereco,
         cnpj=loja.cnpj,
-        password=hashed_password
+        password=loja.password
     )
     db.add(nova_loja)
     db.commit()
     db.refresh(nova_loja)
     return nova_loja
 
-# -----------------------
-# ROTAS LOGIN
-# -----------------------
-@app.post("/login/cliente")
-def login_cliente(email: str = Body(...), password: str = Body(...), db: Session = Depends(get_db)):
+# ----------------------- LOGIN UNIFICADO -----------------------
+@app.post("/login")
+def login(email: str = Body(...), password: str = Body(...), db: Session = Depends(get_db)):
+    # Verificar se o email é de um cliente ou loja
     cliente = db.query(Client).filter(Client.email == email).first()
-    if not cliente or not verify_password(password, cliente.password):
-        raise HTTPException(status_code=401, detail="Email ou senha incorretos")
-    
-    token = create_access_token({"sub": cliente.email, "tipo": "cliente"})
-    return {"access_token": token, "token_type": "bearer"}
-
-@app.post("/login/loja")
-def login_loja(email: str = Body(...), password: str = Body(...), db: Session = Depends(get_db)):
     loja = db.query(Store).filter(Store.email == email).first()
-    if not loja or not verify_password(password, loja.password):
-        raise HTTPException(status_code=401, detail="Email ou senha incorretos")
-    
-    token = create_access_token({"sub": loja.email, "tipo": "loja"})
-    return {"access_token": token, "token_type": "bearer"}
 
-# -----------------------
-# ROTAS PRODUTO
-# -----------------------
+    if cliente:
+        if (password, cliente.password):
+            # Se for um cliente, retorna um token de cliente
+            token = create_access_token({"sub": cliente.email, "tipo": "cliente"})
+            return {"access_token": token, "token_type": "bearer"}
+        else:
+            # Se a senha estiver errada para cliente
+            raise HTTPException(status_code=401, detail="Senha incorreta para cliente")
+    
+    if loja:
+        if (password, loja.password):
+            # Se for uma loja, retorna um token de loja
+            token = create_access_token({"sub": loja.email, "tipo": "loja"})
+            return {"access_token": token, "token_type": "bearer"}
+        else:
+            # Se a senha estiver errada para loja
+            raise HTTPException(status_code=401, detail="Senha incorreta para loja")
+    
+    # Caso nenhum usuário seja encontrado ou a senha esteja incorreta
+    raise HTTPException(status_code=401, detail="Email não encontrado")
+
+
+# ----------------------- PRODUTO -----------------------
 @app.post("/produtos/", response_model=ProductResponse)
 def criar_produto(produto: ProductCreate, db: Session = Depends(get_db)):
     loja = db.query(Store).filter(Store.id == produto.id_loja).first()
@@ -145,9 +147,7 @@ def criar_produto(produto: ProductCreate, db: Session = Depends(get_db)):
     db.refresh(novo_produto)
     return novo_produto
 
-# -----------------------
-# ROTAS PEDIDO
-# -----------------------
+# ----------------------- PEDIDO -----------------------
 @app.post("/pedidos/", response_model=OrderResponse)
 def criar_pedido(pedido: OrderCreate, db: Session = Depends(get_db)):
     cliente = db.query(Client).filter(Client.id == pedido.id_cliente).first()
@@ -168,9 +168,7 @@ def criar_pedido(pedido: OrderCreate, db: Session = Depends(get_db)):
     db.refresh(novo_pedido)
     return novo_pedido
 
-# -----------------------
-# ROTAS GET
-# -----------------------
+# ----------------------- ROTAS GET -----------------------
 @app.get("/clientes/", response_model=list[ClientResponse])
 def listar_clientes(db: Session = Depends(get_db)):
     return db.query(Client).all()
