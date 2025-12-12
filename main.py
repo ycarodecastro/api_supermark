@@ -25,8 +25,12 @@ from schemas.store import StoreCreate, StoreResponse
 from schemas.product import ProductCreate, ProductResponse
 from schemas.order import OrderCreate, OrderResponse
 
-# Criar tabelas no banco (MySQL)
-Base.metadata.create_all(bind=engine)
+try:
+    Base.metadata.create_all(bind=engine)
+    print("Tabelas criadas com sucesso!")
+except Exception as e:
+    print(f"Erro ao criar tabelas: {str(e)}")
+
 
 # Inicializando FastAPI
 app = FastAPI(title="API Supermark")
